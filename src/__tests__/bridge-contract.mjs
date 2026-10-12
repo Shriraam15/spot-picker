@@ -18,7 +18,8 @@
  *   2. The JSON keys `getStatus()` emits are exactly the fields of MockState.
  *   3. `getMockState()` reads every field of that payload (or documents why not).
  *   4. The { ok, error } envelope of start/stop matches the TS MockResult type.
- *   5. The native event `type` values are exactly the ones App.tsx handles, and
+ *   5. The native event `type` values are exactly the ones the web app handles
+ *      (App.tsx, plus the lock screen's verdict handler in security.ts), and
  *      every event field App.tsx reads is one the native side emits.
  *   6. Every travel mode the web app can send is a MotionMode the native side
  *      understands — the ids are a contract like any other, and an unknown one
@@ -44,9 +45,15 @@ const SOURCES = {
   probe: 'android/app/src/main/java/com/spotpicker/app/LocationUpdateProbe.kt',
   mode: 'android/app/src/main/java/com/spotpicker/app/MotionMode.kt',
   route: 'spot-picker/src/lib/route.ts',
+  // The diagnostics screen states the accuracy the mock claims with every fix;
+  // it is web-side text, but it describes a Kotlin number.
+  diagnostics: 'spot-picker/src/lib/diagnostics.ts',
   native: 'spot-picker/src/lib/native.ts',
   types: 'spot-picker/src/lib/types.ts',
   app: 'spot-picker/src/App.tsx',
+  // The fingerprint verdict is the one event App.tsx does not handle itself:
+  // it is consumed by the lock screen, which is driven from here.
+  security: 'spot-picker/src/lib/security.ts',
 }
 
 // ---------------------------------------------------------------------------
@@ -316,9 +323,10 @@ try {
   // -------------------------------------------------------------------------
   section('5. Native events ↔ App.tsx')
   // -------------------------------------------------------------------------
-  // Two ways a payload is built natively: a hand-written JSON template in the
-  // service, and a JSONObject in the probe. Both are events the web app handles.
-  const eventSources = [src.service, src.probe]
+  // Every place a payload is built natively: the hand-written JSON templates in
+  // the service and probe, plus the JSONObject events the bridge (fingerprint
+  // verdict) and the activity (re-lock on background) send.
+  const eventSources = [src.service, src.probe, src.bridge, src.activity]
   const emittedTypes = unique(
     eventSources.flatMap((text) => [
       ...[...text.matchAll(/"type"\s*:\s*"(\w+)"/g)].map((m) => m[1]),
@@ -326,7 +334,7 @@ try {
     ]),
   )
   const handledTypes = unique(
-    [...src.app.matchAll(/event\.type === '(\w+)'/g)].map((m) => m[1]),
+    [...(src.app + src.security).matchAll(/event\.type\s*[!=]==\s*'(\w+)'/g)].map((m) => m[1]),
   )
   sameSet('event types', handledTypes, emittedTypes, ['App.tsx handles', 'native side emits'])
 
@@ -428,6 +436,41 @@ try {
       )
   }
   if (!published.length) fail('published globals', 'no injected/assigned window global found')
+
+  // -------------------------------------------------------------------------
+  section('9. Stated fix accuracy ↔ MotionMode.accuracyMetres')
+  // -------------------------------------------------------------------------
+  // The diagnostics screen has to *say* what accuracy the mock reports, because
+  // the web side cannot measure a fix it does not send. That number is copied
+  // from the Kotlin enum, so a receiver described on screen as "8 m" while the
+  // phone publishes 6 m would go unnoticed until someone compared them.
+  const accuracyBlock = src.diagnostics.match(
+    /export const FIX_ACCURACY_METRES[^=]*=\s*\{([\s\S]*?)\n\}/,
+  )
+  if (!accuracyBlock) {
+    fail('diagnostics states a fix accuracy per mode', 'FIX_ACCURACY_METRES not found in diagnostics.ts')
+  } else {
+    const stated = new Map(
+      unique([...accuracyBlock[1].matchAll(/(\w+):\s*(\d+(?:\.\d+)?)/g)].map((m) => [m[1], m[2]])),
+    )
+    const fromKotlin = unique(
+      [...src.mode.matchAll(/\b[A-Z]+\("([a-z]+)",\s*([\d.]+)f,/g)].map((m) => [m[1], m[2]]),
+    )
+    const drift = []
+    for (const [id, metres] of fromKotlin) {
+      if (!stated.has(id)) drift.push(`${id}: missing from the screen`)
+      else if (stated.get(id) !== metres)
+        drift.push(`${id}: screen says ${stated.get(id)} m, Kotlin says ${metres} m`)
+    }
+    for (const id of stated.keys()) {
+      if (!fromKotlin.some(([m]) => m === id)) drift.push(`${id}: on screen but not a MotionMode`)
+    }
+    if (drift.length) {
+      fail('stated fix accuracy matches MotionMode.accuracyMetres', drift.join('\n'))
+    } else {
+      pass(`every stated accuracy matches its MotionMode (${[...stated.keys()].join(', ')})`)
+    }
+  }
 } catch (err) {
   console.error(`\n✗ the contract check could not run:\n  ${err.message}`)
   process.exit(1)

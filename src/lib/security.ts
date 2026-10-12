@@ -15,6 +15,14 @@
  *    passphrase, which is weaker but still stops casual access.
  */
 
+import {
+  getFingerprintStatus,
+  onNativeEvent,
+  readFingerprintResult,
+  requestFingerprint,
+  type FingerprintStatus,
+} from './native'
+
 const KEY_PREFIX = 'spotpicker_security_v1'
 /** Device credential id enrolled by the fingerprint/face unlock, base64. */
 const BIOMETRIC_KEY = `${KEY_PREFIX}.biometric-credential`
@@ -213,7 +221,7 @@ export async function unlockSecurity(passphrase: string): Promise<boolean> {
   if (secureStore === 'fallback') {
     const hash = await hashPassphrase(passphrase, fromBase64(settings.salt))
     if (hash === settings.wrapped) {
-      sessionSlot().__spotpicker_session = 'fallback-' + Math.random().toString(36).slice(2)
+      markUnlocked('fallback')
       return true
     }
     return false
@@ -228,7 +236,7 @@ export async function unlockSecurity(passphrase: string): Promise<boolean> {
     key,
     new TextEncoder().encode('session-token'),
   )
-  sessionSlot().__spotpicker_session = toBase64(new Uint8Array(token))
+  markUnlocked(toBase64(new Uint8Array(token)))
   return true
 }
 
@@ -351,6 +359,86 @@ export async function promptBiometric(): Promise<boolean> {
  */
 export function isUnlocked(): boolean {
   return Boolean(sessionSlot().__spotpicker_session)
+}
+
+/**
+ * Records a successful unlock. The token lives in memory only, so a reload —
+ * or the app being sent to the background and re-locked by the native side —
+ * asks for the fingerprint again.
+ */
+function markUnlocked(method: string): void {
+  sessionSlot().__spotpicker_session = `${method}-${Math.random().toString(36).slice(2)}`
+}
+
+/**
+ * What this phone's fingerprint sensor can do, as answered by the Android
+ * wrapper. On the web this reports unavailable, because a browser page cannot
+ * reach the device's biometric sheet.
+ */
+export function fingerprintStatus(): FingerprintStatus {
+  return getFingerprintStatus()
+}
+
+/**
+ * Waits for the verdict the Android side sends after the system fingerprint
+ * sheet closes. Resolves with a failure rather than hanging if the phone never
+ * answers, so the lock screen can always show something.
+ */
+function waitForFingerprintVerdict(
+  timeoutMs: number,
+): Promise<{ ok: boolean; error: string | null }> {
+  return new Promise((resolve) => {
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const off = onNativeEvent((event) => {
+      if (event.type !== 'biometricResult') return
+      finish(readFingerprintResult(event))
+    })
+    function finish(verdict: { ok: boolean; error: string | null }) {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      off()
+      resolve(verdict)
+    }
+    timer = setTimeout(
+      () => finish({ ok: false, error: 'The fingerprint prompt did not answer. Touch the sensor to try again.' }),
+      timeoutMs,
+    )
+  })
+}
+
+/**
+ * Opens the app with the fingerprint registered on this phone.
+ *
+ * On the Android app this goes through the wrapper's bridge to Android's own
+ * biometric sheet: the system verifies the enrolled fingerprint and reports the
+ * verdict back as an event. A WebView cannot do this itself — its WebAuthn
+ * implementation has no platform authenticator, which is why the fingerprint
+ * button never worked from the web code alone.
+ *
+ * In a browser the platform WebAuthn prompt is used instead, so the preview
+ * still has a biometric path where one exists.
+ */
+export async function unlockWithFingerprint(
+  timeoutMs = 60_000,
+): Promise<{ ok: boolean; error: string | null }> {
+  if (!getFingerprintStatus().available) {
+    // Not the Android app (or nothing enrolled): ask the browser instead.
+    const ok = await promptBiometric()
+    return ok
+      ? { ok: true, error: null }
+      : { ok: false, error: 'No fingerprint is available here. Use the passphrase on the browser preview.' }
+  }
+
+  const started = requestFingerprint()
+  if (!started.ok) {
+    return { ok: false, error: started.error ?? 'The fingerprint prompt could not open.' }
+  }
+
+  const verdict = await waitForFingerprintVerdict(timeoutMs)
+  if (verdict.ok) markUnlocked('fingerprint')
+  return verdict
 }
 
 /**

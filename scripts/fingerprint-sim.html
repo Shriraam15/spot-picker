@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spot Picker — Android wrapper simulation</title>
+    <script>
+      /*
+       * Stands in for the Android wrapper, so the phone-only halves of the app
+       * can be exercised in a browser: the fingerprint gate, the foreground
+       * service that publishes a position, and the route playback that reports
+       * its own progress.
+       *
+       * Open it through the dev server:  /scripts/fingerprint-sim.html
+       *
+       * window.__sim.succeed controls the fake fingerprint sensor (set it to
+       * false to see the failure path), and window.__sim.pausePlayback freezes
+       * a running route so the UI can be inspected mid-journey.
+       */
+      const toRad = (d) => (d * Math.PI) / 180
+      const EARTH_M = 6371008.8
+      const distanceMetres = (a, b) => {
+        const dLat = toRad(b[0] - a[0])
+        const dLon = toRad(b[1] - a[1])
+        const h =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLon / 2) ** 2
+        return 2 * EARTH_M * Math.asin(Math.min(1, Math.sqrt(h)))
+      }
+
+      const sim = {
+        succeed: true,
+        pausePlayback: false,
+        calls: 0,
+        running: false,
+        points: null,
+        startedAt: 0,
+        frozenAt: 0,
+        speedKmh: 0,
+        finishedSent: false,
+        stationary: null,
+        /* What the joystick has walked the mock to, exactly as the service
+         * holds it while a stick is steering: the newest target wins, and
+         * clearing it hands the position back to the route. */
+        manual: null,
+        manualCalls: 0,
+        manualClears: 0,
+        /* Every target the stick sent, so a run can be read back. */
+        walk: [],
+      }
+      window.__sim = sim
+      window.SpotPickerEvents = window.SpotPickerEvents || {}
+
+      const emit = (payload) => {
+        if (window.SpotPickerEvents.onEvent) window.SpotPickerEvents.onEvent(JSON.stringify(payload))
+      }
+
+      const totalMetres = () => {
+        if (!sim.points) return 0
+        let sum = 0
+        for (let i = 1; i < sim.points.length; i += 1) sum += distanceMetres(sim.points[i - 1], sim.points[i])
+        return sum
+      }
+
+      /* Where the phone publishes from: the stick's target while it is being
+       * steered, else whatever the route itself would report. */
+      const published = (at) => sim.manual ?? at
+
+      const positionAt = (metres) => {
+        if (!sim.points || sim.points.length < 2) return { lat: null, lon: null }
+        let left = Math.max(0, metres)
+        for (let i = 1; i < sim.points.length; i += 1) {
+          const a = sim.points[i - 1]
+          const b = sim.points[i]
+          const leg = distanceMetres(a, b)
+          if (leg <= 0) continue
+          if (left >= leg) {
+            left -= leg
+            continue
+          }
+          const t = left / leg
+          return { lat: a[0] + (b[0] - a[0]) * t, lon: a[1] + (b[1] - a[1]) * t }
+        }
+        const last = sim.points[sim.points.length - 1]
+        return { lat: last[0], lon: last[1] }
+      }
+
+      window.SpotPicker = {
+        isNative: () => true,
+        getStatus: () =>
+          JSON.stringify({
+            available: true,
+            appSelected: true,
+            developerOptions: true,
+            running: sim.running,
+            starting: false,
+            hasPermission: true,
+            error: null,
+          }),
+        getDiagnostics: () =>
+          [
+            'Spot Picker diagnostics (simulated wrapper)',
+            'fingerprint gate available: true (Fingerprint unlock is ready.)',
+            `service running: ${sim.running}`,
+            `route active: ${sim.points !== null}`,
+          ].join('\n'),
+        startMock: (lat, lon) => {
+          sim.running = true
+          sim.stationary = { lat, lon }
+          sim.points = null
+          emit({ type: 'mockState', running: true })
+          return '{"ok":true,"error":null}'
+        },
+        stopMock: () => {
+          sim.running = false
+          sim.points = null
+          sim.stationary = null
+          sim.finishedSent = false
+          sim.manual = null
+          emit({ type: 'mockState', running: false })
+          return '{"ok":true,"error":null}'
+        },
+        /* Streamed while the joystick is held. The route keeps advancing
+         * underneath, so letting go re-joins the journey where it has got to. */
+        setManualPosition: (lat, lon) => {
+          sim.manual = { lat, lon }
+          sim.manualCalls += 1
+          if (sim.walk.length < 500) sim.walk.push({ lat, lon })
+          return '{"ok":true,"error":null}'
+        },
+        clearManualPosition: () => {
+          sim.manual = null
+          sim.manualClears += 1
+          return '{"ok":true,"error":null}'
+        },
+        getRoute: () => {
+          if (!sim.points) {
+            const held = published(sim.stationary)
+            return JSON.stringify({
+              active: false,
+              finished: false,
+              running: sim.running,
+              lat: held ? held.lat : null,
+              lon: held ? held.lon : null,
+              travelledMetres: 0,
+              totalMetres: 0,
+              speedKmh: 0,
+            })
+          }
+          const total = totalMetres()
+          const elapsed = ((sim.pausePlayback ? sim.frozenAt : Date.now()) - sim.startedAt) / 1000
+          const travelled = Math.min(total, (elapsed * sim.speedKmh) / 3.6)
+          const at = positionAt(travelled)
+          /* Steered by hand, the phone publishes the walked target; the route
+           * still advances underneath, so the report below is the route's
+           * progress with the stick's position on top of it. */
+          const shown = published(at)
+          const finished = travelled >= total
+          if (finished && !sim.finishedSent) {
+            sim.finishedSent = true
+            setTimeout(() => emit({ type: 'routeFinished', lat: at.lat, lon: at.lon }), 0)
+          }
+          return JSON.stringify({
+            active: true,
+            finished,
+            running: sim.running,
+            lat: shown.lat,
+            lon: shown.lon,
+            travelledMetres: travelled,
+            totalMetres: total,
+            speedKmh: sim.speedKmh,
+          })
+        },
+        startRoute: (waypointsJson, speedKmh) => {
+          let parsed = []
+          try {
+            parsed = JSON.parse(waypointsJson)
+          } catch {
+            return '{"ok":false,"error":"bad waypoints"}'
+          }
+          if (!Array.isArray(parsed) || parsed.length < 2) {
+            return '{"ok":false,"error":"A route needs at least two points."}'
+          }
+          sim.points = parsed
+          sim.speedKmh = speedKmh
+          sim.startedAt = Date.now()
+          sim.frozenAt = Date.now()
+          sim.finishedSent = false
+          sim.running = true
+          emit({ type: 'mockState', running: true })
+          return '{"ok":true,"error":null}'
+        },
+        startLiveUpdateTest: () => '{"ok":true,"error":null}',
+        requestPermissions: () => {},
+        openDeveloperOptions: () => {},
+        openAboutPhone: () => {},
+        openAppSettings: () => {},
+        openExternalUrl: () => '{"ok":true,"error":null}',
+        biometricStatus: () =>
+          JSON.stringify({
+            supported: true,
+            enrolled: true,
+            available: true,
+            reason: 'Fingerprint unlock is ready.',
+            sdk: 35,
+          }),
+        requestBiometricUnlock: () => {
+          sim.calls += 1
+          const ok = sim.succeed
+          setTimeout(
+            () =>
+              emit({
+                type: 'biometricResult',
+                ok,
+                error: ok ? null : 'Fingerprint does not match.',
+              }),
+            300,
+          )
+          return '{"ok":true,"error":null}'
+        },
+        openBiometricSettings: () => {},
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

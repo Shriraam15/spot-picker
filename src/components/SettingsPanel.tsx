@@ -5,6 +5,7 @@ import { ROUTE_MODES } from '@/lib/types'
 import { getRecentSearches } from '@/lib/recent-searches'
 import { loadFavorites } from '@/lib/favorites'
 import { useTheme } from '@/lib/theme'
+import { attributionText, type MapStyleId } from '@/lib/map-style'
 import { applyBackup, exportBackup, parseBackup } from '@/lib/backup'
 import { resetStats } from '@/lib/stats'
 
@@ -15,6 +16,10 @@ type Props = {
   onImportFavorites: () => void
   /** Engages the app lock immediately (same state as on page load). */
   onLock: () => void
+  /** The basemap in use, so the credits name the right provider. */
+  mapStyle: MapStyleId
+  /** Opens the diagnostics screen: live service state, provider fixes, accuracy. */
+  onOpenDiagnostics: () => void
 }
 
 const SHORTCUTS: [string, string][] = [
@@ -25,7 +30,15 @@ const SHORTCUTS: [string, string][] = [
   ['↑  ↓', 'Move through the suggestion list'],
 ]
 
-export default function SettingsPanel({ favorites, onClearRecentSearches, onExportFavorites, onImportFavorites, onLock }: Props) {
+export default function SettingsPanel({
+  favorites,
+  onClearRecentSearches,
+  onExportFavorites,
+  onImportFavorites,
+  onLock,
+  mapStyle,
+  onOpenDiagnostics,
+}: Props) {
   const { theme, toggle } = useTheme()
   const settings = loadSettings()
   const [backupMsg, setBackupMsg] = useState<string | null>(null)
@@ -84,6 +97,38 @@ export default function SettingsPanel({ favorites, onClearRecentSearches, onExpo
               Switch to {theme === 'dark' ? 'Light' : 'Dark'}
             </Button>
           </div>
+        </div>
+      </Card>
+
+      {/*
+        Diagnostics sits at the top of Settings because this is where someone
+        goes when the app is not working, and the screen it opens is the answer
+        to "why": every service, the mock provider, and the GPS accuracy, each
+        with the fix for it.
+      */}
+      <Card>
+        <CardHeader
+          title="Diagnostics"
+          hint="What is working, what is broken, and how to fix it"
+        />
+        <div className="px-4 pb-4">
+          <button
+            type="button"
+            onClick={onOpenDiagnostics}
+            className="flex w-full items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2.5 text-left transition-colors hover:border-[var(--border-strong)]"
+          >
+            <Icon name="pulse" className="h-5 w-5 shrink-0 text-[var(--accent)]" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-[var(--text)]">
+                Service &amp; GPS diagnostics
+              </span>
+              <span className="block text-xs text-[var(--text-muted)]">
+                Live checks of tiles, search, routing and the mock provider, plus the accuracy
+                this app publishes next to the phone&rsquo;s own.
+              </span>
+            </span>
+            <Icon name="chevronRight" className="h-4 w-4 shrink-0 text-[var(--text-subtle)]" />
+          </button>
         </div>
       </Card>
 
@@ -362,7 +407,8 @@ export default function SettingsPanel({ favorites, onClearRecentSearches, onExpo
               Offline place database © <a href="https://www.geonames.org/" className="text-[var(--accent)] underline-offset-2 hover:underline">GeoNames</a>, licensed under{' '}
               <a href="https://creativecommons.org/licenses/by/4.0/" className="text-[var(--accent)] underline-offset-2 hover:underline">CC BY 4.0</a>.
               Airport data from <a href="https://ourairports.com/" className="text-[var(--accent)] underline-offset-2 hover:underline">OurAirports</a> (public domain).
-              Map tiles © OpenStreetMap contributors.
+              Map tiles: {attributionText(mapStyle)}. Offline world map drawn from{' '}
+              <a href="https://www.naturalearthdata.com/" className="text-[var(--accent)] underline-offset-2 hover:underline">Natural Earth</a> (public domain).
             </p>
           </div>
 

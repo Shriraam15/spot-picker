@@ -4,6 +4,18 @@ export type LatLng = {
   lon: number
 }
 
+/** A target position the joystick is steering to. The service publishes
+ * whatever is current while the thumb is held, so this is a stream of
+ * targets rather than one command: the phone follows the thumb, the route
+ * underneath keeps advancing, and letting go re-joins the journey.
+ */
+export type ManualPosition = {
+  /** The coordinate the thumb is dragging the mock toward. */
+  lat: number
+  /** The coordinate the thumb is dragging the mock toward, in longitude. */
+  lon: number
+}
+
 /** A place returned by the Nominatim search endpoint. */
 export type Place = {
   id: string
@@ -21,6 +33,11 @@ export type Favorite = {
   lon: number
   createdAt: number
 }
+
+
+
+
+/** A place returned by the Nominatim search endpoint. */
 
 /**
  * Live progress of a simulated route. Reported by the Android foreground

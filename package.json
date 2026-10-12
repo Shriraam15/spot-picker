@@ -1,14 +1,16 @@
 {
   "name": "spot-picker",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "data": "node scripts/build-gazetteer.mjs",
+    "tiles": "node scripts/build-tiles.mjs",
+    "e2e:offline": "node src/__tests__/e2e-offline-map.mjs",
     "lint": "oxlint",
-    "test": "node src/__tests__/bridge-contract.mjs && node src/__tests__/route-geometry.mjs",
+    "test": "node src/__tests__/bridge-contract.mjs && node src/__tests__/route-geometry.mjs && node src/__tests__/walk-step.mjs && node src/__tests__/offline-tiles.mjs && node src/__tests__/diagnostics-checks.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

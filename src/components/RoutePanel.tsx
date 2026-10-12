@@ -473,6 +473,7 @@ export default function RoutePanel({
             size="sm"
             onClick={() => {
               onSaveDefaults({
+                ...loadSettings(),
                 defaultSpeedKmh: Math.min(MAX_SPEED_KMH, Math.max(MIN_SPEED_KMH, speedKmh)),
                 routePreference: preference,
               })
@@ -486,7 +487,7 @@ export default function RoutePanel({
             size="sm"
             disabled={speedKmh === loadSettings().defaultSpeedKmh && preference === loadSettings().routePreference}
             onClick={() => {
-              onSaveDefaults({ defaultSpeedKmh: 45, routePreference: 'fastest' })
+              onSaveDefaults({ ...loadSettings(), defaultSpeedKmh: 45, routePreference: 'fastest' })
             }}
           >
             Reset to 45 / fastest

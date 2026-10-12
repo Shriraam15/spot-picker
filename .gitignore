@@ -25,3 +25,6 @@ dist-ssr
 
 # Raw gazetteer sources (regenerate app data with `npm run data`)
 scripts/geonames/
+
+# Raw Natural Earth vectors (regenerate the offline tiles with `npm run tiles`)
+scripts/natural-earth/

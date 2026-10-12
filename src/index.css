@@ -105,12 +105,44 @@ body {
 }
 
 /*
- * Dark mode for the map. OpenStreetMap's tiles are key-free and light-only, so
- * they are inverted and desaturated rather than swapping to an API-key-gated
- * dark provider. hue-rotate restores the original hues after inverting.
+ * The dark map style. OpenStreetMap's tiles are key-free and light-only, so the
+ * dark style inverts and desaturates them rather than switching to an
+ * API-key-gated dark provider; hue-rotate restores the original hues after
+ * inverting. The bundled offline tiles are drawn dark already and carry no
+ * filter, so they are left alone.
+ *
+ * This follows the chosen map style rather than the app theme: the style is an
+ * explicit decision about how the map should look, and a light map in a dark
+ * app is a light map.
  */
-.dark .leaflet-tile-pane {
+.map-tiles-dark {
   filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.6);
+}
+
+/*
+ * Place names over the offline world: readable over pale land and dark sea
+ * alike, so the label carries its own halo instead of relying on the map.
+ */
+.offline-label span {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  text-shadow:
+    0 0 2px var(--surface),
+    0 0 3px var(--surface),
+    0 0 4px var(--surface);
+  pointer-events: none;
+}
+
+.dark .offline-label span {
+  text-shadow:
+    0 0 2px #000,
+    0 0 3px #000,
+    0 0 4px #000;
 }
 
 .leaflet-control-zoom a {
@@ -342,4 +374,83 @@ nav button:hover::after {
    figures stop them jittering as the digits change. */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------------
+ * Motion.
+ *
+ * A live app should look like it is live. These are the three movements the UI
+ * uses: a card rising as a page or a tab appears, a toast dropping in, and a
+ * pulse for anything that is actively publishing a position. All of them are
+ * short and none of them loop except the pulse, which is the point of it.
+ * --------------------------------------------------------------------------- */
+@keyframes spot-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes spot-drop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes spot-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--accent-soft);
+  }
+  70% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+
+.animate-rise {
+  animation: spot-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-drop {
+  animation: spot-drop 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.live-glow {
+  animation: spot-glow 2.4s ease-out infinite;
+}
+
+/* Stagger the cards inside a freshly opened page so they arrive in sequence
+   rather than as one block. */
+.stagger > * {
+  animation: spot-rise 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.stagger > *:nth-child(2) {
+  animation-delay: 0.04s;
+}
+.stagger > *:nth-child(3) {
+  animation-delay: 0.08s;
+}
+.stagger > *:nth-child(4) {
+  animation-delay: 0.12s;
+}
+.stagger > *:nth-child(n + 5) {
+  animation-delay: 0.16s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise,
+  .animate-drop,
+  .live-glow,
+  .stagger > * {
+    animation: none;
+  }
 }

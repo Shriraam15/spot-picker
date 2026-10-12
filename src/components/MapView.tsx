@@ -2,12 +2,27 @@ import { useEffect, useRef } from 'react'
 import L from 'leaflet'
 import type { LatLng } from '@/lib/types'
 import { splitRoute } from '@/lib/route'
-
-const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+import {
+  OFFLINE_ATTRIBUTION,
+  OFFLINE_MAX_ZOOM,
+  TRANSPARENT_TILE,
+  mapStyle,
+  offlineTileUrl,
+  type MapStyleId,
+} from '@/lib/map-style'
+import { WORLD_TOP } from '@/lib/world-seed'
 
 const WORLD_CENTER: [number, number] = [20, 4]
+
+/**
+ * Place names to show on the offline world, by zoom: the bundle carries the
+ * largest places first, and a world view cannot fit more than a handful.
+ */
+const LABEL_COUNTS: Record<number, number> = { 0: 6, 1: 10, 2: 18, 3: 30, 4: 44 }
+const MAX_LABELS = 44
+
+const escapeHtml = (text: string): string =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 /**
  * Reads a design token so Leaflet's vector layers follow the app theme instead
@@ -64,6 +79,10 @@ type Props = {
   follow?: boolean
   /** Redraws the vectors when the palette changes. */
   theme?: string
+  /** Which basemap to draw. */
+  style?: MapStyleId
+  /** Called when the online tiles start or stop arriving. */
+  onTilesStateChange?: (offline: boolean) => void
 }
 
 /**
@@ -86,19 +105,29 @@ export default function MapView({
   livePosition,
   follow = false,
   theme,
+  style = 'light',
+  onTilesStateChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const markerRef = useRef<L.Marker | null>(null)
   const liveMarkerRef = useRef<L.Marker | null>(null)
   const routeLayerRef = useRef<L.LayerGroup | null>(null)
+  const baseLayerRef = useRef<L.TileLayer | null>(null)
+  const onlineLayerRef = useRef<L.TileLayer | null>(null)
+  const labelsLayerRef = useRef<L.LayerGroup | null>(null)
+  /** True once the online tiles have stopped arriving; the world shows through. */
+  const offlineRef = useRef(false)
+  const drawLabelsRef = useRef<() => void>(() => {})
   // Keep the latest callbacks without re-creating the map when they change identity.
   const onPickRef = useRef(onPick)
   const onLocateRef = useRef(onLocateStateChange)
   const onSelectRouteRef = useRef(onSelectRoute)
+  const onTilesStateRef = useRef(onTilesStateChange)
   onPickRef.current = onPick
   onLocateRef.current = onLocateStateChange
   onSelectRouteRef.current = onSelectRoute
+  onTilesStateRef.current = onTilesStateChange
 
   // ---- create the map once -------------------------------------------------
   useEffect(() => {
@@ -119,15 +148,6 @@ export default function MapView({
     })
     mapRef.current = map
 
-    // OpenStreetMap's standard tiles are key-free; dark mode is achieved with a
-    // CSS filter on .leaflet-tile-pane (see index.css) rather than a second,
-    // API-key-gated tile provider.
-    L.tileLayer(TILE_URL, {
-      attribution: TILE_ATTRIBUTION,
-      maxZoom: 19,
-      crossOrigin: true,
-    }).addTo(map)
-
     map.on('click', (e: L.LeafletMouseEvent) => {
       onPickRef.current?.({ lat: e.latlng.lat, lon: e.latlng.lng })
     })
@@ -147,6 +167,136 @@ export default function MapView({
       markerRef.current = null
       liveMarkerRef.current = null
       routeLayerRef.current = null
+      baseLayerRef.current = null
+      onlineLayerRef.current = null
+      labelsLayerRef.current = null
+      drawLabelsRef.current = () => {}
+    }
+  }, [])
+
+  // ---- the basemap: the provider's tiles over the bundled world ------------
+  //
+  // Laid out as two layers on purpose. The offline world sits underneath, so a
+  // tile that never arrives — no data, a blocked host — simply fails and lets
+  // the world below show: nothing is hidden behind a broken-image icon, and the
+  // pin and the route still sit on a map of somewhere.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    const chosen = mapStyle(style)
+
+    // maxNativeZoom is what makes the bundle enough: past zoom 4 Leaflet scales
+    // the zoom-4 tile up rather than asking for a tile nobody has.
+    const base = L.tileLayer(offlineTileUrl(chosen.id), {
+      attribution: OFFLINE_ATTRIBUTION,
+      maxNativeZoom: OFFLINE_MAX_ZOOM,
+      maxZoom: chosen.maxZoom,
+      errorTileUrl: TRANSPARENT_TILE,
+      className: 'map-tiles-base',
+    })
+    const online = L.tileLayer(chosen.tiles, {
+      attribution: chosen.attribution,
+      maxZoom: chosen.maxZoom,
+      errorTileUrl: TRANSPARENT_TILE,
+      crossOrigin: true,
+      className: chosen.dark ? 'map-tiles-online map-tiles-dark' : 'map-tiles-online',
+    })
+    base.addTo(map)
+    online.addTo(map)
+    baseLayerRef.current = base
+    onlineLayerRef.current = online
+
+    let loaded = 0
+    let failed = 0
+    let settle: number | null = null
+
+    // Offline is a fact about the tiles, not about navigator.onLine: a phone on
+    // a captive portal reports being online and still fetches nothing.
+    const setOffline = (next: boolean) => {
+      if (offlineRef.current === next) return
+      offlineRef.current = next
+      drawLabelsRef.current()
+      onTilesStateRef.current?.(next)
+    }
+    // The verdict is per batch of tiles, not per session: signal dropping
+    // halfway through a pan has to be noticed as much as it is on the first
+    // load. Leaflet announces each batch with `loading`.
+    const onLoading = () => {
+      loaded = 0
+      failed = 0
+    }
+    const settleSoon = () => {
+      if (settle !== null) return
+      settle = window.setTimeout(() => {
+        settle = null
+        if (failed >= 2 && failed > loaded) setOffline(true)
+        else if (loaded > 0 && loaded >= failed) setOffline(false)
+      }, 400)
+    }
+    const onLoad = (event: L.TileEvent) => {
+      // Leaflet swaps a tile that failed for `errorTileUrl` and then fires
+      // `load` for that stand-in, so an error tile counts as an arrival unless
+      // it is filtered out — and it would keep the map claiming to be online
+      // while it is drawing the bundled world underneath.
+      const src = (event as { tile?: HTMLImageElement }).tile?.src ?? ''
+      if (src.startsWith('data:')) return
+      loaded += 1
+      settleSoon()
+    }
+    const onError = () => {
+      failed += 1
+      settleSoon()
+    }
+    online.on('loading', onLoading)
+    online.on('tileload', onLoad)
+    online.on('tileerror', onError)
+
+    return () => {
+      if (settle !== null) window.clearTimeout(settle)
+      online.off('loading', onLoading)
+      online.off('tileload', onLoad)
+      online.off('tileerror', onError)
+      base.remove()
+      online.remove()
+      baseLayerRef.current = null
+      onlineLayerRef.current = null
+    }
+  }, [style])
+
+  // ---- place names, for the world the bundle carries -----------------------
+  //
+  // The offline tiles are a drawing, not a map with names on it, and a world
+  // with no names is hard to read. The gazetteer already ships the biggest
+  // places, so they are drawn as labels while the provider's tiles are not
+  // arriving — and cleared the moment they are.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    const layer = L.layerGroup().addTo(map)
+    labelsLayerRef.current = layer
+    const draw = () => {
+      layer.clearLayers()
+      if (!offlineRef.current) return
+      const limit = LABEL_COUNTS[Math.round(map.getZoom())] ?? MAX_LABELS
+      for (const place of WORLD_TOP.slice(0, limit)) {
+        L.marker([place.lat, place.lon], {
+          interactive: false,
+          keyboard: false,
+          icon: L.divIcon({
+            className: 'offline-label',
+            html: `<span>${escapeHtml(place.name)}</span>`,
+            iconSize: [0, 0],
+          }),
+        }).addTo(layer)
+      }
+    }
+    drawLabelsRef.current = draw
+    map.on('zoomend', draw)
+    return () => {
+      map.off('zoomend', draw)
+      layer.remove()
+      labelsLayerRef.current = null
+      drawLabelsRef.current = () => {}
     }
   }, [])
 

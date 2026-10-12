@@ -6,9 +6,12 @@ Android APK, and it also runs standalone in a browser.
 ```bash
 npm install
 npm run dev      # dev server
-npm test         # bridge contract + route geometry
+npm test         # bridge contract + route geometry + walk + offline map
 npm run build    # production build -> dist/
 npm run preview  # serve the production build
+npm run data     # rebuild the offline gazetteer from scripts/geonames/
+npm run tiles    # redraw the offline map tiles from Natural Earth vectors
+npm run e2e:offline  # with the dev server running: the map with no network at all
 ```
 
 ## Layout
@@ -34,6 +37,11 @@ src/
     routing.ts         road routes from OSRM, with road names, alternatives, direct line
     haptics.ts         navigator.vibrate wrapper
     theme.ts           light/dark toggle
+    map-style.ts       the three map styles, their providers and offline tiles
+    walk.ts            joystick walk maths (pure, so the tests can load it)
+public/
+  tiles/               offline world map: 3 styles × zooms 0-4, drawn by npm run tiles
+  data/                offline gazetteer shards, written by npm run data
 ```
 
 ## Tests
@@ -59,13 +67,72 @@ the check fails against the old code. The thinning checks assert an absolute 20 
 ceiling on the deviation rather than the module's own tolerance, because a test that
 asks a module whether it obeys its own constant passes when the constant is wrong.
 
-Both are dependency-free — no build, no emulator.
+[`walk-step.mjs`](src/__tests__/walk-step.mjs): the joystick's walk. It covers the
+things that fail quietly — a deadzone that eats an honest push, a diagonal that walks
+root-two times too fast, and a "walk" that moves the mock once and then stands still.
+It also checks the arithmetic end to end through `nudge`, so a held stick is proved to
+travel at the pace it is set to.
+
+[`offline-tiles.mjs`](src/__tests__/offline-tiles.mjs): the offline map. It decodes the
+committed PNGs rather than trusting the generator, and checks that every style has a
+complete pyramid, that the palettes are the ones the app thinks it is drawing, that
+known geography lands where it should (Paris is land, the mid-Pacific is sea), that a
+tile *inside* a continent is still land — the case a clipped-edge renderer gets wrong —
+and that the app and the generator agree on how deep the bundle goes.
+
+The four above are dependency-free — no build, no emulator, no browser.
+
+[`e2e-offline-map.mjs`](src/__tests__/e2e-offline-map.mjs) is the one check that needs both:
+a browser and the dev server (`npm run e2e:offline`). It drives Chromium against the app
+twice. First with every off-origin request aborted, which is what a phone with no data
+is like, and asserts that the bundled world is what gets drawn — decoded out of the
+canvas rather than trusted, with the badge, the place names, the pin and the style
+switcher all still working. Then with the provider's tiles answered from a local stand-in
+(a real bundled PNG), because the interesting failure is the opposite one: detection that
+latches on the first batch, or that counts Leaflet's transparent stand-in for a failed
+tile as an arrival, would leave the app calling itself offline while a perfectly good map
+is on screen. It is the only place the two verdicts are proved to be reachable and
+distinguishable.
 
 ## Notes
 
-- The map uses OpenStreetMap tiles only. Dark mode is a CSS filter on
-  `.leaflet-tile-pane` rather than a second tile provider, because every key-free dark
-  tile provider either requires an API key or has since started.
+- **The map has three styles**, from `lib/map-style.ts`: *Light* and *Dark* are
+  OpenStreetMap's tiles (dark is the same tiles flipped by a filter, because every
+  key-free dark raster basemap now wants an API key the app would have to ship), and
+  *Terrain* is OpenTopoMap. Nothing here needs a key, and each provider's required
+  credit is attached to its own layer, so switching styles switches the credit with it.
+  The choice is the user's and is kept in `spotpicker.settings`; with nothing saved yet
+  it follows the app theme, so a dark app does not open onto a white map.
+- **A world map ships inside the app**, under `public/tiles`, so the map draws with no
+  data at all. It is drawn by `npm run tiles` from Natural Earth vectors (public
+  domain) — land, lakes, borders, plus rivers and relief tints for the terrain palette —
+  in the same three palettes, at zooms 0–4 in 8-bit indexed PNGs: 1023 tiles, about
+  1.5 MB. Leaflet treats those as `maxNativeZoom: 4`, so zooming deeper scales the
+  zoom-4 tile up rather than asking for a tile nobody has.
+- **The offline world is drawn by us rather than cached from a provider** on purpose.
+  OpenStreetMap's tile usage policy forbids offline use and pre-seeding outright,
+  OpenTopoMap says nothing about keeping tiles, and the providers that do permit it
+  (Stadia, Thunderforest) want a key and a subscription. Public-domain vectors have no
+  such terms, and the `errorTileUrl` trick makes the pair seamless: a provider tile
+  that fails to load is transparent, so the world underneath is simply what shows.
+- **"Offline" is decided by the tiles, not by `navigator.onLine`**: a phone behind a
+  captive portal reports being online and still fetches nothing. `MapView` counts
+  `tileload` against `tileerror` and tells the app, which shows a badge and lets
+  `MapView` label the bundled world with the biggest places from the gazetteer it
+  already carries. The moment tiles arrive again the labels and the badge go away.
+  Two details make that verdict honest: the counts are reset for each batch of tiles
+  (Leaflet's `loading` event), so signal lost halfway through a pan is noticed as much
+  as it is on the first load; and a tile whose `src` is the transparent error stub is
+  not counted as an arrival, because Leaflet fires `tileload` for that stand-in once it
+  has swapped it in — without that, a map with no data at all would report itself online.
+- The map's floating controls sit in a container that is `pointer-events-none`, so that
+  taps aimed at the gaps between them reach the map. `pointer-events` is inherited, so
+  every button in that cluster has to opt back in with `pointer-events-auto`; without it
+  the style, locate and reset buttons are visible, focusable and completely dead to a
+  finger — the tap lands on the map and drops a pin instead.
+- The app theme no longer filters the map: the filter belongs to the *dark style*, so a
+  light map in a dark app stays light. The bundled dark tiles are drawn dark already and
+  carry no filter of their own.
 - The marker is a Leaflet `divIcon`, so there are no marker image assets to keep in sync
   with the bundler.
 - Mock-location controls only appear when `window.SpotPicker` exists. Everything else —

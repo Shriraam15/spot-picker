@@ -245,6 +245,28 @@ export function thinToLimit(points: LatLng[], maxPoints: number = MAX_ROUTE_POIN
   return out.length > maxPoints ? decimate(out, maxPoints) : out
 }
 
+/**
+ * A closed loop of [points] waypoints around [center] at [radiusMetres].
+ *
+ * This is the "patrol" journey: instead of walking from A to B once, the dot
+ * circles a place and keeps coming back to it, which is what a location that
+ * is supposed to look alive needs. It is built with [nudge] so the loop is a
+ * real circle on the globe rather than a circle in degrees — the two are very
+ * different away from the equator — and the first point is repeated at the end
+ * so the native side plays it as a closed circuit.
+ */
+export function circleRoute(center: LatLng, radiusMetres: number, points = 24): LatLng[] {
+  const count = Math.max(8, Math.min(120, Math.round(points)))
+  const radius = Math.max(5, radiusMetres)
+  const loop: LatLng[] = []
+  for (let i = 0; i < count; i += 1) {
+    const angle = (i / count) * Math.PI * 2
+    loop.push(nudge(center, Math.cos(angle) * radius, Math.sin(angle) * radius))
+  }
+  loop.push(loop[0])
+  return loop
+}
+
 /** The loosest a path may deviate before the point count stops mattering. */
 const MAX_DEVIATION_M = 12
 

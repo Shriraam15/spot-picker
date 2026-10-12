@@ -32,6 +32,16 @@ type NativeApi = {
   openAppSettings(): void
   /** JSON of { ok, error }. Hands an https link to the system's browser or Maps. */
   openExternalUrl(url: string): string
+  /** JSON of { ok, error }. Publishes this position while the joystick is held. */
+  setManualPosition(lat: number, lon: number): string
+  /** JSON of { ok, error }. Hands the position back to the route. */
+  clearManualPosition(): string
+  /** JSON of FingerprintStatus: what this phone's biometrics can do. */
+  biometricStatus(): string
+  /** JSON of { ok, error }; the verdict arrives as a biometricResult event. */
+  requestBiometricUnlock(): string
+  /** Opens Android's fingerprint enrolment screen. */
+  openBiometricSettings(): void
 }
 
 declare global {
@@ -202,6 +212,123 @@ export function getRoute(): RouteProgress | null {
   }
 }
 
+/**
+ * Tells the service to publish [lat, lon] while the joystick is held.
+ *
+ * The web side never owns the position — the foreground service does, because it
+ * has to keep publishing with the screen off — so steering is a stream of
+ * targets rather than a command: the service publishes the newest one, four
+ * times a second or however fast the finger moves. The route underneath keeps
+ * advancing, so letting go re-joins the journey where it has got to.
+ */
+export function setManualPosition(lat: number, lon: number): MockResult {
+  const bridge = api()
+  if (!bridge?.setManualPosition) {
+    return { ok: false, error: 'Steering needs the Android app.' }
+  }
+  return parse<MockResult>(
+    call(
+      () => bridge.setManualPosition(lat, lon),
+      '{"ok":false,"error":"Native bridge unavailable."}',
+    ),
+    { ok: false, error: 'Native bridge unavailable.' },
+  )
+}
+
+/** Hands the published position back to the route or the stationary pin. */
+export function clearManualPosition(): MockResult {
+  const bridge = api()
+  if (!bridge?.clearManualPosition) {
+    return { ok: false, error: 'Steering needs the Android app.' }
+  }
+  return parse<MockResult>(
+    call(
+      () => bridge.clearManualPosition(),
+      '{"ok":false,"error":"Native bridge unavailable."}',
+    ),
+    { ok: false, error: 'Native bridge unavailable.' },
+  )
+}
+
+/**
+ * How this phone can open the app with a fingerprint.
+ *
+ * `available` is the field that matters: it is true only when the phone has a
+ * sensor *and* at least one fingerprint enrolled. Anything else — no hardware,
+ * nothing enrolled, a refused API — comes with a `reason` in the phone's own
+ * words, which is what the lock screen shows instead of a button that cannot
+ * work.
+ */
+export type FingerprintStatus = {
+  supported: boolean
+  enrolled: boolean
+  available: boolean
+  reason: string
+}
+
+/** What a browser (or any device without the Android bridge) reports. */
+export const NO_FINGERPRINT: FingerprintStatus = {
+  supported: false,
+  enrolled: false,
+  available: false,
+  reason: 'Fingerprint unlock needs the Android app.',
+}
+
+/**
+ * Reads this device's fingerprint status. On the web this is always
+ * unavailable, because a browser page cannot reach the phone's biometric sheet
+ * — the Android wrapper answers instead.
+ */
+export function getFingerprintStatus(): FingerprintStatus {
+  const bridge = api()
+  if (!bridge?.biometricStatus) return NO_FINGERPRINT
+  const parsed = parse<Partial<FingerprintStatus>>(
+    call(() => bridge.biometricStatus(), '{}'),
+    {},
+  )
+  return {
+    supported: parsed.supported === true,
+    enrolled: parsed.enrolled === true,
+    available: parsed.available === true,
+    reason: typeof parsed.reason === 'string' ? parsed.reason : NO_FINGERPRINT.reason,
+  }
+}
+
+/**
+ * Asks the phone to show its fingerprint sheet. This returning ok only means
+ * the request was queued: the verdict is a `biometricResult` event, because a
+ * fingerprint takes as long as a finger takes.
+ */
+export function requestFingerprint(): MockResult {
+  const bridge = api()
+  if (!bridge?.requestBiometricUnlock) {
+    return { ok: false, error: 'Fingerprint unlock needs the Android app.' }
+  }
+  return parse<MockResult>(
+    call(
+      () => bridge.requestBiometricUnlock(),
+      '{"ok":false,"error":"Native bridge unavailable."}',
+    ),
+    { ok: false, error: 'Native bridge unavailable.' },
+  )
+}
+
+/** Reads a `biometricResult` event, which carries the OS verdict. */
+export function readFingerprintResult(event: Record<string, unknown>): {
+  ok: boolean
+  error: string | null
+} {
+  return {
+    ok: event.ok === true,
+    error: typeof event.error === 'string' ? event.error : null,
+  }
+}
+
+/** Opens Android's fingerprint enrolment screen. */
+export function openFingerprintSettings(): void {
+  call(() => api()?.openBiometricSettings?.(), undefined)
+}
+
 export function requestPermissions(): void {
   call(() => api()?.requestPermissions(), undefined)
 }
@@ -291,7 +418,12 @@ export function nativeSummary(): string {
  */
 export function onNativeEvent(handler: (event: { type: string; [key: string]: unknown }) => void): () => void {
   if (typeof window === 'undefined') return () => {}
-  const target = window.SpotPickerEvents
+  // The wrapper creates this object before any page script runs, but an older
+  // WebView without DOCUMENT_START_SCRIPT support would leave it undefined —
+  // and then every native event, including the fingerprint verdict, would be
+  // dropped. Creating it here makes the transport available either way, since
+  // the Android side looks the object up when it has an event to send.
+  const target = (window.SpotPickerEvents = window.SpotPickerEvents ?? {})
   if (!target) return () => {}
   const previous = target.onEvent
   target.onEvent = (payload: unknown) => {

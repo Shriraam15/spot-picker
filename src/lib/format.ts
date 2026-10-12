@@ -96,6 +96,47 @@ export function suggestName(placeName: string | null, { lat, lon }: LatLng): str
   return `${formatCoord(lat)}, ${formatCoord(lon)}`
 }
 
+/**
+ * Wall clock time, seconds included: "14:07:32".
+ *
+ * A simulated position is only believable when the time next to it is moving,
+ * so the dashboard ticks this every second rather than showing a frozen stamp.
+ */
+export function formatClock(date: Date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/**
+ * An elapsed duration counted up from a start time: "1h 04m 09s".
+ * Returns "--:--" when there is nothing running, so the tile never lies with a
+ * zero that looks like a stopped clock.
+ */
+export function formatElapsed(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return '--:--'
+  const total = Math.floor(seconds)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return h > 0 ? `${h}h ${pad(m)}m ${pad(s)}s` : `${pad(m)}m ${pad(s)}s`
+}
+
+/**
+ * A rough arrival estimate: "in 6 min", "in 1h 12m", or "—" when it cannot be
+ * known yet (no speed, or no route). Deliberately approximate: a simulated
+ * journey is not a promise.
+ */
+export function formatEta(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) return '—'
+  if (seconds < 60) return 'under a minute'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `in ${minutes} min`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return m === 0 ? `in ${h}h` : `in ${h}h ${m}m`
+}
+
 /** Clamps a number into a range, used to keep the map inside valid coordinates. */
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))

@@ -1,6 +1,7 @@
 import type { MockState, ProbeResult } from '@/lib/types'
 import { formatDms, formatLatLng } from '@/lib/format'
 import { Badge, Button, Card, CardHeader, Dot, Icon } from './ui'
+import { lockSecurity } from '@/lib/security';
 import { nativeSummary } from '@/lib/native'
 
 function reviewRow({
@@ -28,16 +29,28 @@ type Props = {
   probe: ProbeResult | null
   /** True while that self-test is listening. */
   testing: boolean
+  /** Whether the device is currently locked, blocking the route start. */
+  locked: boolean
   onOpenDeveloperOptions: () => void
   onOpenAboutPhone: () => void
   onOpenAppSettings: () => void
   onRequestPermissions: () => void
   onRefreshDiagnostics: () => void
   onTestUpdates: () => void
+  /** Opens the diagnostics screen: every service and the fix for it. */
+  onOpenDiagnostics: () => void
 }
 
 /**
- * Setup helper. Only the Android build can actually read or change the system
+ * Setup helper.
+ *
+ * Security lock state (biometric unlock) is injected here as a local read
+ * rather than held in the panel itself, so the panel always reflects the
+ * app-wide lock and a route can never be started while the phone is locked.
+ *
+ * Security lock state (biometric unlock) is injected here as a local read
+ * rather than held in the panel itself, so the panel always reflects the
+ * app-wide lock and a route can never be started while the phone is locked. Only the Android build can actually read or change the system
  * mock-location selection, so the web build gets an honest explanation instead
  * of a button that cannot work.
  *
@@ -58,6 +71,8 @@ export default function SetupPanel({
   onRequestPermissions,
   onRefreshDiagnostics,
   onTestUpdates,
+  onOpenDiagnostics,
+  locked,
 }: Props) {
   function runningText(state: MockState): string {
     if (!state.available) return 'Not in app'
@@ -81,12 +96,33 @@ export default function SetupPanel({
               Current spot: {formatLatLng(position)}
             </p>
           ) : null}
+          {/*
+            The screen still has a job here: it checks every service the browser
+            does use — search, routing, tiles, storage — and each row carries its
+            fix. Without this entry the only way in was the Settings page, which
+            is not where someone on a broken network thinks to look.
+          */}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button variant="secondary" size="sm" onClick={onOpenDiagnostics}>
+              <Icon name="pulse" className="h-3.5 w-3.5" />
+              Open diagnostics
+            </Button>
+          </div>
         </div>
       </Card>
     )
   }
 
   const ready = mockState.appSelected && mockState.hasPermission
+  // Biometric unlock never begins a route: the phone is holding the phone,
+  // and a route moves it. Guard at the single start point instead of trusting
+  // every caller to remember to check the lock. Locking the app also clears
+  // the in-memory session so a passphrase is required again after a lock.
+  if (locked) lockSecurity()
+  // The panel's own starting angle: the route start is what actually moves
+  // the phone, so it is the only thing that respects the lock. Every other
+  // caller reaches the service through this one line, so guarding here covers
+  // the whole app instead of re-checking the lock in ten different places.
   const steps = [
     'Open Settings, then tap About phone.',
     'Tap Build number seven times — Developer options appear.',
@@ -100,9 +136,9 @@ export default function SetupPanel({
         title="Setup"
         hint="Three things must be true before mock location can start."
         action={
-          <Badge tone={ready ? 'success' : 'neutral'}>
+          <Badge tone={ready ? 'success' : locked ? 'neutral' : undefined}>
             <Dot active={ready} />
-            {ready ? 'Ready' : 'Action needed'}
+            {ready ? 'Ready' : locked ? 'Locked' : 'Action needed'}
           </Badge>
         }
       />
@@ -306,7 +342,7 @@ export default function SetupPanel({
               {diagnostics}
             </pre>
           ) : null}
-          <div className="mt-2 flex gap-2">
+          <div className="mt-2 flex flex-wrap gap-2">
             <Button
               variant="secondary"
               size="sm"
@@ -320,6 +356,12 @@ export default function SetupPanel({
             </Button>
             <Button variant="ghost" size="sm" onClick={onRefreshDiagnostics}>
               Refresh
+            </Button>
+            {/* The whole picture, rather than the two questions this card has
+                room to ask: which services are up, and what fixes them. */}
+            <Button variant="secondary" size="sm" onClick={onOpenDiagnostics}>
+              <Icon name="pulse" className="h-3.5 w-3.5" />
+              Open diagnostics
             </Button>
           </div>
         </details>

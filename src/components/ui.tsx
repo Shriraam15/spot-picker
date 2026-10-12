@@ -200,6 +200,8 @@ export type IconName =
   | 'right'| 'gauge'
   | 'clock'| 'walk' | 'run' | 'bike' | 'car' | 'pulse'
   | 'lock' | 'fingerprint' | 'shield' | 'user' | 'key'
+  | 'share' | 'rotate' | 'chevronRight' | 'bolt' | 'history'
+  | 'layers' | 'mountain'
 
 const ICON_PATHS: Record<IconName, ReactNode> = {
   search: (
@@ -352,4 +354,41 @@ const ICON_PATHS: Record<IconName, ReactNode> = {
   ),
   /** A heartbeat line: used for the live-update self-test. */
   pulse: <path d="M2.5 12.5h4l2.2-5.5 3.1 10.5 2.4-5h7.3" />,
+  share: (
+    <>
+      <path d="M12 15V3M8.5 6.5 12 3l3.5 3.5" />
+      <path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
+    </>
+  ),
+  /** Circular arrow: the patrol loop, and "replay this trip". */
+  rotate: (
+    <>
+      <path d="M20 12a8 8 0 1 1-2.7-6" />
+      <path d="M20 4v5h-5" />
+    </>
+  ),
+  chevronRight: <path d="m9 5 7 7-7 7" />,
+  /** Lightning: the one-tap actions. */
+  bolt: <path d="M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12z" />,
+  /** A clock with an arrow: past journeys rather than a pending wait. */
+  layers: (
+    <>
+      <path d="m12 3 8 4.5-8 4.5-8-4.5z" />
+      <path d="m4 12.5 8 4.5 8-4.5" />
+      <path d="m4 16.5 8 4.5 8-4.5" />
+    </>
+  ),
+  mountain: (
+    <>
+      <path d="M3 19h18" />
+      <path d="m5 19 6-12 4 8 2-3 2 7" />
+    </>
+  ),
+  history: (
+    <>
+      <path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1" />
+      <path d="M3.5 4v4h4" />
+      <path d="M12 8v4.5l3 1.8" />
+    </>
+  ),
 }
