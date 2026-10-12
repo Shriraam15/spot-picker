@@ -2,7 +2,7 @@ import type { LatLng, MockState, ProbeResult, RouteModeId, RouteProgress } from 
 
 /**
  * Shape of the Java object the Android wrapper injects into the WebView under
- * the name "SpotPicker" (see android/app/src/main/java/.../SpotPickerBridge.kt).
+ * the name "SpotPicker" (see spot-picker/android/app/src/main/java/.../SpotPickerBridge.kt).
  *
  * Every method returns a JSON string rather than a complex value because
  * @JavascriptInterface only marshals primitives reliably across the boundary.

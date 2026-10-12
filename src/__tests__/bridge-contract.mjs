@@ -37,13 +37,13 @@ const WEB = join(HERE, '..', '..') // spot-picker/
 const REPO = join(WEB, '..') // project root
 
 const SOURCES = {
-  bridge: 'android/app/src/main/java/com/spotpicker/app/SpotPickerBridge.kt',
-  service: 'android/app/src/main/java/com/spotpicker/app/MockLocationService.kt',
-  activity: 'android/app/src/main/java/com/spotpicker/app/MainActivity.kt',
+  bridge: 'spot-picker/android/app/src/main/java/com/spotpicker/app/SpotPickerBridge.kt',
+  service: 'spot-picker/android/app/src/main/java/com/spotpicker/app/MockLocationService.kt',
+  activity: 'spot-picker/android/app/src/main/java/com/spotpicker/app/MainActivity.kt',
   // The update probe reports through the same event channel as the service, so
   // its event names and payload keys are part of the same contract.
-  probe: 'android/app/src/main/java/com/spotpicker/app/LocationUpdateProbe.kt',
-  mode: 'android/app/src/main/java/com/spotpicker/app/MotionMode.kt',
+  probe: 'spot-picker/android/app/src/main/java/com/spotpicker/app/LocationUpdateProbe.kt',
+  mode: 'spot-picker/android/app/src/main/java/com/spotpicker/app/MotionMode.kt',
   route: 'spot-picker/src/lib/route.ts',
   // The diagnostics screen states the accuracy the mock claims with every fix;
   // it is web-side text, but it describes a Kotlin number.

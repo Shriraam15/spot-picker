@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Map tiles and place search. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Publishing a test location requires a real location permission too. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!--
+      Makes this app selectable under Developer options > "Select mock location app".
+      Android grants the matching app-op when the user picks the app, which is why
+      the declaration alone is enough; the lint warning is expected and suppressed.
+    -->
+    <uses-permission
+        android:name="android.permission.ACCESS_MOCK_LOCATION"
+        tools:ignore="MockLocation" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Normal permission, granted at install: lets the web UI pulse the phone
+         when a mock location starts or stops. navigator.vibrate() is a no-op
+         without it, and silently so. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!--
+      The app opens through the phone's own biometric sheet (androidx.biometric),
+      so it needs the biometric permission. USE_FINGERPRINT is the pre-Android-9
+      spelling of the same thing; it only applies up to API 27, where
+      androidx.biometric still falls back to FingerprintManager.
+    -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission
+        android:name="android.permission.USE_FINGERPRINT"
+        android:maxSdkVersion="27" />
+
+    <!-- The map only works with a GPS-capable device. -->
+    <uses-feature
+        android:name="android.hardware.location.gps"
+        android:required="false" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.SpotPicker"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.SpotPicker"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale|layoutDirection|navigation">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Keeps publishing the mock location alive while the app is backgrounded. -->
+        <service
+            android:name=".MockLocationService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <!--
+          Backs the notification's Stop action. A broadcast always gets delivered,
+          unlike a service intent aimed at a service that may already be gone.
+        -->
+        <receiver
+            android:name=".StopReceiver"
+            android:exported="false" />
+
+        <!--
+          Delivers the fixes the live-update self-test subscribes to. Unexported,
+          so only the system completing our own PendingIntent can reach it.
+        -->
+        <receiver
+            android:name=".ProbeReceiver"
+            android:exported="false" />
+
+    </application>
+
+</manifest>

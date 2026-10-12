@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Spot Picker</string>
+
+    <string name="notification_channel_name">Mock location</string>
+    <string name="notification_channel_description">
+        Shown while Spot Picker is publishing a mock location.
+    </string>
+    <string name="notification_title">Publishing mock location</string>
+    <string name="notification_stop">Stop</string>
+</resources>

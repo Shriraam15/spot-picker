@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the web app's light background so there is no flash on launch. -->
+    <color name="background">#F6F6F7</color>
+    <color name="accent">#4F46E5</color>
+    <color name="launcher_background">#4F46E5</color>
+</resources>
